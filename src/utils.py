@@ -11,24 +11,36 @@ from transformers import AutoTokenizer
 def load_model(model_path, device=None, dtype=torch.bfloat16):
     """
     Load a model and tokenizer.
-    
+
     Args:
         model_path: Path to the model
-        device: Device to load model on
+        device: Device to load model on (use "auto" for multi-GPU)
         dtype: Data type for model
-        
+
     Returns:
         tuple: (model, tokenizer)
     """
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    # Load the model
-    model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
+    # Check for multi-GPU setup
+    num_gpus = torch.cuda.device_count()
+    print(f"Detected {num_gpus} GPUs")
+
+    # For large models (70B+), use device_map="auto" for multi-GPU distribution
+    if "70B" in model_path or "70b" in model_path or num_gpus > 1:
+        print("Using multi-GPU device mapping")
+        model = HookedTransformer.from_pretrained(
+            model_path,
+            device_map="auto",  # Automatically distribute across GPUs
+            dtype=dtype
+        )
+    else:
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
+
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     tokenizer.pad_token = tokenizer.eos_token
     model.eval()
-    
+
     return model, tokenizer
 
 def load_contrastive_dataset(file_path, tokenizer=None):
