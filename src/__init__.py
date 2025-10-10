@@ -1,5 +1,5 @@
 """Contrastive Steering Vectors package for analyzing test vs deployment behaviors."""
-import vector_generation
-import probe_analysis
-import visualization
-import utils
+from . import vector_generation
+from . import probe_analysis
+from . import visualization
+from . import utils
