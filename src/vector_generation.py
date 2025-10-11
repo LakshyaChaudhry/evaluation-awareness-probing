@@ -10,17 +10,21 @@ from tqdm import tqdm
 def extract_activations_all_layers(model, tokens, token_type, layers, tokenizer=None):
     """
     Extract activations for specific token positions across multiple layers.
-    
+
     Args:
         model: HookedTransformer model
         tokens: Tokenized input
         token_type: Token type to extract (e.g., 'A' for the (A) token)
         layers: List of layer indices to extract from
         tokenizer: Optional tokenizer (uses model's tokenizer if None)
-        
+
     Returns:
         dict: Dictionary mapping layer indices to activation tensors
     """
+    # Use model's tokenizer if not provided
+    if tokenizer is None:
+        tokenizer = model.tokenizer
+
     cached_activations = {}
 
     def make_hook(layer):
