@@ -6,7 +6,7 @@ import json
 import torch
 import zipfile
 from transformer_lens import HookedTransformer
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def load_model(model_path, device=None, dtype=torch.bfloat16):
     """
@@ -24,12 +24,23 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
     num_gpus = torch.cuda.device_count()
     print(f"Detected {num_gpus} GPUs")
 
-    # For large models (70B+), use device_map="auto" for multi-GPU distribution
-    if "70B" in model_path or "70b" in model_path or num_gpus > 1:
-        print("Using multi-GPU device mapping")
+    # For large models (70B+), load with HuggingFace then convert to HookedTransformer
+    if "70B" in model_path or "70b" in model_path:
+        print("Loading large model with multi-GPU distribution...")
+
+        # First load with HuggingFace's device_map (works properly)
+        hf_model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            device_map="auto",
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True
+        )
+
+        # Convert to HookedTransformer
+        print("Converting to HookedTransformer...")
         model = HookedTransformer.from_pretrained(
             model_path,
-            device_map="auto",  # Automatically distribute across GPUs
+            hf_model=hf_model,  # Use already-loaded model
             dtype=dtype
         )
     else:
