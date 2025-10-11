@@ -36,12 +36,13 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
             low_cpu_mem_usage=True
         )
 
-        # Convert to HookedTransformer
+        # Convert to HookedTransformer without reprocessing weights
         print("Converting to HookedTransformer...")
-        model = HookedTransformer.from_pretrained(
+        model = HookedTransformer.from_pretrained_no_processing(
             model_path,
             hf_model=hf_model,  # Use already-loaded model
-            dtype=dtype
+            dtype=dtype,
+            device="cpu"  # Model already on correct devices
         )
     else:
         if device is None:
