@@ -14,7 +14,7 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
 
     Args:
         model_path: Path to the model
-        device: Device to load model on (use "auto" for multi-GPU)
+        device: Device to load model on
         dtype: Data type for model
 
     Returns:
@@ -24,29 +24,29 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
     num_gpus = torch.cuda.device_count()
     print(f"Detected {num_gpus} GPUs")
 
-    # For large models (70B+), load with HuggingFace then convert to HookedTransformer
-    if "70B" in model_path or "70b" in model_path:
+    # Set device if not specified
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # For small to medium models (8B, 13B), use simple loading
+    if "8B" in model_path or "8b" in model_path or "13B" in model_path or "13b" in model_path:
+        print(f"Loading model directly to {device}...")
+        model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
+
+    # For large models (70B+), need multi-GPU with device_map
+    elif "70B" in model_path or "70b" in model_path:
         print("Loading large model with multi-GPU distribution...")
 
-        # First load with HuggingFace's device_map (works properly)
-        hf_model = AutoModelForCausalLM.from_pretrained(
+        # For 70B, use device_map="auto" for automatic GPU distribution
+        model = HookedTransformer.from_pretrained(
             model_path,
             device_map="auto",
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True
+            dtype=dtype
         )
 
-        # Convert to HookedTransformer without reprocessing weights
-        print("Converting to HookedTransformer...")
-        model = HookedTransformer.from_pretrained_no_processing(
-            model_path,
-            hf_model=hf_model,  # Use already-loaded model
-            dtype=dtype,
-            device="cpu"  # Model already on correct devices
-        )
+    # Default: standard loading
     else:
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Loading model to {device}...")
         model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)

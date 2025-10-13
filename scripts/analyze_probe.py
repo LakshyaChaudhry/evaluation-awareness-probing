@@ -27,11 +27,21 @@ def main():
     parser.add_argument("--control-count", type=int, default=10, help="Number of control random probes to generate")
     parser.add_argument("--visualize", action="store_true", help="Generate visualizations")
     parser.add_argument("--show-plots", action="store_true", help="Show plots (requires display)")
+    parser.add_argument("--device", default="cuda", help="Device to run on (default: cuda)")
+    parser.add_argument("--dtype", default="bfloat16", help="Data type (default: bfloat16)")
     args = parser.parse_args()
-    
+
+    # Set dtype
+    if args.dtype == "bfloat16":
+        dtype = torch.bfloat16
+    elif args.dtype == "float16":
+        dtype = torch.float16
+    else:
+        dtype = torch.float32
+
     # Load model and vectors
     print(f"Loading model: {args.model}")
-    model, tokenizer = load_model(args.model)
+    model, tokenizer = load_model(args.model, device=args.device, dtype=dtype)
     
     print(f"Loading vectors from: {args.vectors}")
     vectors = load_vectors_from_dir(args.vectors)
