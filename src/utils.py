@@ -28,26 +28,51 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # For small to medium models (8B, 13B), use simple loading
-    if "8B" in model_path or "8b" in model_path or "13B" in model_path or "13b" in model_path:
-        print(f"Loading model directly to {device}...")
-        model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
+    # Try to load with HookedTransformer.from_pretrained first
+    # If it fails (custom model), fall back to loading from HF then converting
+    try:
+        # For small to medium models (8B, 13B), use simple loading
+        if "8B" in model_path or "8b" in model_path or "13B" in model_path or "13b" in model_path:
+            print(f"Loading model directly to {device}...")
+            model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
 
-    # For large models (70B+), need multi-GPU with device_map
-    elif "70B" in model_path or "70b" in model_path:
-        print("Loading large model with multi-GPU distribution...")
+        # For large models (70B+), need multi-GPU with device_map
+        elif "70B" in model_path or "70b" in model_path or "hal9000" in model_path.lower():
+            print("Loading large model with multi-GPU distribution...")
 
-        # For 70B, use device_map="auto" for automatic GPU distribution
-        model = HookedTransformer.from_pretrained(
+            # For 70B, use device_map="auto" for automatic GPU distribution
+            model = HookedTransformer.from_pretrained(
+                model_path,
+                device_map="auto",
+                dtype=dtype
+            )
+
+        # Default: standard loading
+        else:
+            print(f"Loading model to {device}...")
+            model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
+
+    except (ValueError, KeyError) as e:
+        # Model not in TransformerLens registry - load from HuggingFace manually
+        print(f"Model not in TransformerLens registry. Loading from HuggingFace...")
+        print(f"This is a custom fine-tuned model based on Llama 70B")
+
+        # Load HuggingFace model first
+        hf_model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            device_map="auto",
-            dtype=dtype
+            torch_dtype=dtype,
+            device_map="auto" if num_gpus > 1 else device,
+            trust_remote_code=True
         )
 
-    # Default: standard loading
-    else:
-        print(f"Loading model to {device}...")
-        model = HookedTransformer.from_pretrained(model_path, device=device, dtype=dtype)
+        # Convert to HookedTransformer
+        print("Converting to HookedTransformer...")
+        model = HookedTransformer.from_pretrained(
+            "meta-llama/Llama-3.3-70B-Instruct",  # Use base architecture
+            hf_model=hf_model,
+            device=device,
+            dtype=dtype
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     tokenizer.pad_token = tokenizer.eos_token
