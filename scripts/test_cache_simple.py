@@ -66,13 +66,13 @@ def test_caching(model_name, num_examples=10):
             test_tokens = model.to_tokens(test_prompt)
             test_acts = {}
 
-            def make_hook(layer):
+            def make_test_hook(layer_idx):
                 def hook_fn(activation, hook):
-                    test_acts[layer] = activation[:, -1, :].clone().detach().cpu()
+                    test_acts[layer_idx] = activation[:, -1, :].clone().detach().cpu()
                     return activation
                 return hook_fn
 
-            fwd_hooks = [(f"blocks.{layer}.hook_resid_pre", make_hook(layer)) for layer in layers]
+            fwd_hooks = [(f"blocks.{layer}.hook_resid_pre", make_test_hook(layer)) for layer in layers]
             model.reset_hooks()
             with model.hooks(fwd_hooks=fwd_hooks):
                 with torch.no_grad():
@@ -85,7 +85,13 @@ def test_caching(model_name, num_examples=10):
             deploy_tokens = model.to_tokens(deploy_prompt)
             deploy_acts = {}
 
-            fwd_hooks = [(f"blocks.{layer}.hook_resid_pre", make_hook(layer)) for layer in layers]
+            def make_deploy_hook(layer_idx):
+                def hook_fn(activation, hook):
+                    deploy_acts[layer_idx] = activation[:, -1, :].clone().detach().cpu()
+                    return activation
+                return hook_fn
+
+            fwd_hooks = [(f"blocks.{layer}.hook_resid_pre", make_deploy_hook(layer)) for layer in layers]
             model.reset_hooks()
             with model.hooks(fwd_hooks=fwd_hooks):
                 with torch.no_grad():
