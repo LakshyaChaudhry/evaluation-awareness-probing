@@ -97,9 +97,13 @@ def compute_probe_score(activation, probe_vector):
     Returns:
         float: Probe score
     """
+    # Flatten both tensors to 1D
+    activation_flat = activation.flatten()
+    probe_flat = probe_vector.flatten()
+
     # Project activation onto probe vector
     # Score = dot(activation, normalized_probe)
-    score = torch.dot(activation, probe_vector[0]) / probe_vector[0].norm()
+    score = torch.dot(activation_flat, probe_flat) / probe_flat.norm()
     return score.item()
 
 def analyze_cached_dataset(activations, metadata, probe_vectors, layer, output_file=None):
