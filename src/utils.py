@@ -55,23 +55,54 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
     except (ValueError, KeyError) as e:
         # Model not in TransformerLens registry - load from HuggingFace manually
         print(f"Model not in TransformerLens registry. Loading from HuggingFace...")
-        print(f"This is a custom fine-tuned model based on Llama 70B")
+        print(f"This is a custom fine-tuned model")
 
-        # Load HuggingFace model first
+        # Load HuggingFace model first with device_map for multi-GPU
+        print("Loading HuggingFace model with device_map='auto'...")
         hf_model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype=dtype,
-            device_map="auto" if num_gpus > 1 else device,
-            trust_remote_code=True
+            device_map="auto",
+            trust_remote_code=True,
+            low_cpu_mem_usage=True
         )
 
-        # Convert to HookedTransformer
+        # Convert to HookedTransformer using the HF model directly
         print("Converting to HookedTransformer...")
+        # Determine base model architecture from config
+        try:
+            # Try to infer base model from model card or config
+            from transformers import AutoConfig
+            config = AutoConfig.from_pretrained(model_path)
+
+            # Map to base model name
+            if "llama" in config.model_type.lower():
+                if hasattr(config, 'num_hidden_layers'):
+                    num_layers = config.num_hidden_layers
+                    if num_layers >= 70:  # 70B+ model
+                        base_model = "meta-llama/Llama-3.3-70B-Instruct"
+                    elif num_layers >= 40:  # ~30B model
+                        base_model = "llama-30b-hf"
+                    else:  # smaller models
+                        base_model = "meta-llama/Llama-3.1-8B-Instruct"
+                else:
+                    base_model = "meta-llama/Llama-3.3-70B-Instruct"  # default to 70B
+            else:
+                base_model = "meta-llama/Llama-3.3-70B-Instruct"  # fallback
+
+            print(f"Using base architecture: {base_model}")
+        except:
+            base_model = "meta-llama/Llama-3.3-70B-Instruct"
+            print(f"Could not determine base model, defaulting to: {base_model}")
+
+        # Convert with minimal memory usage
         model = HookedTransformer.from_pretrained(
-            "meta-llama/Llama-3.3-70B-Instruct",  # Use base architecture
+            base_model,
             hf_model=hf_model,
-            device=device,
-            dtype=dtype
+            device_map="auto",
+            dtype=dtype,
+            fold_ln=False,  # Don't fold layer norm to save memory
+            center_writing_weights=False,  # Don't center weights
         )
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
