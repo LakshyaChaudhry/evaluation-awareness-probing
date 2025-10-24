@@ -85,7 +85,7 @@ python scripts/create_validation_data.py \
 python scripts/cache_activations_hf.py \
   --model meta-llama/Llama-3.3-70B-Instruct \
   --data datasets/contrastive_dataset.json \
-  --layers 10,20,23,25,30,40,50,60,70 \
+  --layers 10,20,23,25,30,40,50,60,70, 80 \
   --output activations_cache/llama70b_contrastive \
   --dtype bfloat16
 
@@ -93,7 +93,7 @@ python scripts/cache_activations_hf.py \
 python scripts/cache_validation_activations_hf.py \
   --model meta-llama/Llama-3.3-70B-Instruct \
   --data datasets/validation_real.json \
-  --layers 10,20,23,25,30,40,50,60,70 \
+  --layers 10,20,23,25,30,40,50,60,70, 80 \
   --output activations_cache/llama70b_validation_fixed \
   --dtype bfloat16
 ```
@@ -103,7 +103,7 @@ python scripts/cache_validation_activations_hf.py \
 python scripts/generate_vectors_from_cache.py \
   --cache activations_cache/llama70b_contrastive \
   --output run_llama70b \
-  --layers 10,20,23,25,30,40,50,60,70
+  --layers 10,20,23,25,30,40,50,60,70, 80 
 ```
 
 **4. Evaluate probes (fast - from cache):**
