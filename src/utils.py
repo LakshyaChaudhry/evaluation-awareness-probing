@@ -57,12 +57,13 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
         print(f"Model not in TransformerLens registry. Loading from HuggingFace...")
         print(f"This is a custom fine-tuned model")
 
-        # Load HuggingFace model first with device_map for multi-GPU
-        print("Loading HuggingFace model with device_map='auto'...")
+        # Load HuggingFace model
+        # For custom models, DON'T use device_map="auto" as it causes meta tensors
+        # TransformerLens will handle multi-GPU placement after conversion
+        print("Loading HuggingFace model...")
         hf_model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype=dtype,
-            device_map="auto",
             trust_remote_code=True,
             low_cpu_mem_usage=True
         )
@@ -96,11 +97,12 @@ def load_model(model_path, device=None, dtype=torch.bfloat16):
             print(f"Could not determine base model, defaulting to: {base_model}")
 
         # Convert with minimal memory usage
+        # Now convert - TransformerLens will handle device placement
         model = HookedTransformer.from_pretrained(
             base_model,
             hf_model=hf_model,
-            device_map="auto",
             dtype=dtype,
+            device_map="auto",  # TransformerLens can handle this after conversion
             fold_ln=False,  # Don't fold layer norm to save memory
             center_writing_weights=False,  # Don't center weights
         )
