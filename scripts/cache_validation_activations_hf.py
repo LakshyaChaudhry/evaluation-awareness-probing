@@ -38,13 +38,24 @@ def load_model_hf(model_path, dtype=torch.bfloat16):
     return model, tokenizer
 
 def extract_activation_hf(model, tokens, layer_idx):
-    """Extract activation from a specific layer at the last token."""
+    """
+    Extract activation from a specific layer using HuggingFace model.
+
+    Args:
+        model: HuggingFace model
+        tokens: Input token IDs
+        layer_idx: Layer index to extract from
+
+    Returns:
+        Activation tensor for ALL tokens (shape: [batch_size, seq_len, hidden_dim])
+    """
     activation = None
 
     def hook_fn(module, input, output):
         nonlocal activation
-        # Take the last token position
-        activation = output[0][:, -1, :].detach().cpu().clone()
+        # output[0] is the hidden states
+        # Take ALL token positions, not just the last one
+        activation = output[0].detach().cpu().clone()  # [batch, seq_len, hidden]
 
     hook_handle = model.model.layers[layer_idx].register_forward_hook(hook_fn)
 
@@ -112,15 +123,16 @@ def cache_validation_activations(model, tokenizer, dataset, layers, output_dir):
         json.dump(metadata, f, indent=2)
     print(f"✓ Saved metadata: {metadata_path}")
 
-    # Get activation shape
-    sample_shape = activations_by_layer[layers[0]][0].shape
+    # Get sample activation shapes (first 3 examples to show variability)
+    sample_shapes = [activations_by_layer[layers[0]][i].shape for i in range(min(3, len(dataset)))]
 
     # Save layer info
     layer_info = {
         'layers': layers,
         'num_examples': len(dataset),
-        'activation_shape': list(sample_shape),
-        'note': 'Validation activations - one per example, from raw questions'
+        'storage_format': 'individual',  # Indicate storage format
+        'sample_shapes': [list(s) for s in sample_shapes],  # Show example shapes
+        'note': 'Validation activations - one per example, from raw questions, variable seq lengths'
     }
     layer_info_path = os.path.join(output_dir, 'layer_info.json')
     with open(layer_info_path, 'w') as f:
@@ -129,16 +141,17 @@ def cache_validation_activations(model, tokenizer, dataset, layers, output_dir):
 
     # Save activations per layer
     for layer in layers:
-        # Stack all activations for this layer
-        activations_stacked = torch.stack(activations_by_layer[layer])
-
         layer_dir = os.path.join(output_dir, f'layer_{layer}')
         os.makedirs(layer_dir, exist_ok=True)
 
-        # Save as single file (not test/deploy split)
-        torch.save(activations_stacked, os.path.join(layer_dir, 'activations.pt'))
+        # Save each activation individually to handle variable sequence lengths
+        for idx, activation in enumerate(activations_by_layer[layer]):
+            torch.save(activation, os.path.join(layer_dir, f'{idx}.pt'))
 
-        print(f"✓ Layer {layer}: {activations_stacked.shape}")
+        # Show sample shapes to verify variable lengths
+        sample_shapes = [activations_by_layer[layer][i].shape for i in range(min(3, len(activations_by_layer[layer])))]
+        print(f"✓ Layer {layer}: saved {len(activations_by_layer[layer])} activations")
+        print(f"  Sample shapes: {sample_shapes}")
 
     print(f"\n✓ Successfully cached {len(dataset)} validation activations across {len(layers)} layers")
     print(f"  Cache directory: {output_dir}")

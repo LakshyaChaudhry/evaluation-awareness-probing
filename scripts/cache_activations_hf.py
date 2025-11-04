@@ -46,15 +46,15 @@ def extract_activation_hf(model, tokens, layer_idx):
         layer_idx: Layer index to extract from
 
     Returns:
-        Activation tensor for the last token
+        Activation tensor for ALL tokens (shape: [batch_size, seq_len, hidden_dim])
     """
     activation = None
 
     def hook_fn(module, input, output):
         nonlocal activation
         # output[0] is the hidden states
-        # Take the last token position
-        activation = output[0][:, -1, :].detach().cpu().clone()
+        # Take ALL token positions, not just the last one
+        activation = output[0].detach().cpu().clone()  # [batch, seq_len, hidden]
 
     # Register hook on the specified layer
     # For Llama models, layers are in model.model.layers
@@ -176,14 +176,16 @@ def cache_activations_hf(model, tokenizer, dataset, layers, output_dir):
         json.dump(metadata, f, indent=2)
     print(f"✓ Saved metadata: {metadata_path}")
 
-    # Get activation shape
-    sample_shape = test_activations[layers[0]][0].shape
+    # Get sample activation shapes (first 3 examples to show variability)
+    sample_shapes = [test_activations[layers[0]][i].shape for i in range(min(3, len(dataset)))]
 
     # Save layer info
     layer_info = {
         'layers': layers,
         'num_examples': len(dataset),
-        'activation_shape': list(sample_shape)
+        'storage_format': 'individual',  # Indicate storage format
+        'sample_shapes': [list(s) for s in sample_shapes],  # Show example shapes
+        'note': 'Each activation saved separately to handle variable sequence lengths'
     }
     layer_info_path = os.path.join(output_dir, 'layer_info.json')
     with open(layer_info_path, 'w') as f:
@@ -192,17 +194,21 @@ def cache_activations_hf(model, tokenizer, dataset, layers, output_dir):
 
     # Save activations per layer
     for layer in layers:
-        # Stack all activations for this layer
-        test_acts_layer = torch.stack(test_activations[layer])
-        deploy_acts_layer = torch.stack(deploy_activations[layer])
-
         layer_dir = os.path.join(output_dir, f'layer_{layer}')
-        os.makedirs(layer_dir, exist_ok=True)
+        test_dir = os.path.join(layer_dir, 'test')
+        deploy_dir = os.path.join(layer_dir, 'deploy')
+        os.makedirs(test_dir, exist_ok=True)
+        os.makedirs(deploy_dir, exist_ok=True)
 
-        torch.save(test_acts_layer, os.path.join(layer_dir, 'test_activations.pt'))
-        torch.save(deploy_acts_layer, os.path.join(layer_dir, 'deploy_activations.pt'))
+        # Save each activation individually
+        for idx, (test_act, deploy_act) in enumerate(zip(test_activations[layer], deploy_activations[layer])):
+            torch.save(test_act, os.path.join(test_dir, f'{idx}.pt'))
+            torch.save(deploy_act, os.path.join(deploy_dir, f'{idx}.pt'))
 
-        print(f"✓ Layer {layer}: test {test_acts_layer.shape}, deploy {deploy_acts_layer.shape}")
+        # Show sample shapes to verify variable lengths
+        sample_test_shapes = [test_activations[layer][i].shape for i in range(min(3, len(test_activations[layer])))]
+        print(f"✓ Layer {layer}: saved {len(test_activations[layer])} test and deploy activations")
+        print(f"  Sample test shapes: {sample_test_shapes}")
 
     print(f"\n✓ Successfully cached activations for {len(dataset)} examples across {len(layers)} layers")
     print(f"  Cache directory: {output_dir}")
