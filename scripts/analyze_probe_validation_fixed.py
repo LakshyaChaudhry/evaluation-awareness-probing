@@ -30,11 +30,37 @@ def load_vectors_from_dir(directory):
     return vectors
 
 def compute_probe_score(activation, probe_vector):
-    """Compute probe score for an activation."""
-    activation_flat = activation.flatten()
-    probe_flat = probe_vector.flatten()
-    score = torch.dot(activation_flat, probe_flat) / probe_flat.norm()
-    return score.item()
+    """
+    Compute probe score for an activation.
+
+    Following the paper: average dot product across all tokens.
+
+    Args:
+        activation: Tensor of shape [batch, seq_len, hidden_dim] or [batch, hidden_dim]
+        probe_vector: Probe vector of shape [hidden_dim]
+
+    Returns:
+        float: Averaged probe score
+    """
+    # Handle multi-token activations
+    if activation.dim() == 3:  # [batch, seq_len, hidden_dim]
+        # Compute dot product for each token, then average
+        # activation shape: [1, seq_len, hidden_dim]
+        # probe shape: [hidden_dim]
+        activation = activation.squeeze(0)  # [seq_len, hidden_dim]
+
+        # Compute dot product for each token
+        token_scores = torch.matmul(activation, probe_vector) / probe_vector.norm()  # [seq_len]
+
+        # Average across tokens (as per the paper)
+        score = token_scores.mean()
+        return score.item()
+    else:
+        # Old format: [batch, hidden_dim] or [hidden_dim]
+        activation_flat = activation.flatten()
+        probe_flat = probe_vector.flatten()
+        score = torch.dot(activation_flat, probe_flat) / probe_flat.norm()
+        return score.item()
 
 def analyze_validation(cache_dir, validation_data_path, probe_vectors, layer, output_file=None):
     """
@@ -53,7 +79,26 @@ def analyze_validation(cache_dir, validation_data_path, probe_vectors, layer, ou
 
     # Load cached activations for this layer
     layer_dir = os.path.join(cache_dir, f'layer_{layer}')
-    activations = torch.load(os.path.join(layer_dir, 'activations.pt'))
+
+    # Check if using new individual storage format or old stacked format
+    individual_file = os.path.join(layer_dir, '0.pt')
+    stacked_file = os.path.join(layer_dir, 'activations.pt')
+
+    if os.path.exists(individual_file):
+        # New format: individual files
+        print(f"Loading individual activation files for layer {layer}...")
+        activations = []
+        for idx in range(len(validation_data)):
+            act = torch.load(os.path.join(layer_dir, f'{idx}.pt'))
+            activations.append(act)
+    elif os.path.exists(stacked_file):
+        # Old format: single stacked file
+        print(f"Loading stacked activations for layer {layer}...")
+        activations = torch.load(stacked_file)
+        # Convert to list for uniform handling
+        activations = [activations[i] for i in range(len(activations))]
+    else:
+        raise FileNotFoundError(f"Could not find activations in {layer_dir}")
 
     probe = probe_vectors[layer]
 
@@ -68,7 +113,7 @@ def analyze_validation(cache_dir, validation_data_path, probe_vectors, layer, ou
         # Get the activation for this example
         activation = activations[idx]
 
-        # Compute probe score
+        # Compute probe score (will average over tokens if needed)
         score = compute_probe_score(activation, probe)
 
         results.append({

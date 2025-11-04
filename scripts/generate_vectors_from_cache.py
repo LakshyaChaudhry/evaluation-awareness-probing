@@ -43,19 +43,43 @@ def load_cached_activations(cache_dir, layers=None):
 
     print(f"Loading activations for {len(layers)} layers: {layers}")
 
+    # Check storage format
+    storage_format = layer_info.get('storage_format', 'stacked')  # Default to old format
+    num_examples = layer_info['num_examples']
+
     # Load activations per layer
     test_activations = {}
     deploy_activations = {}
 
     for layer in layers:
         layer_dir = os.path.join(cache_dir, f'layer_{layer}')
-        test_acts = torch.load(os.path.join(layer_dir, 'test_activations.pt'))
-        deploy_acts = torch.load(os.path.join(layer_dir, 'deploy_activations.pt'))
 
-        test_activations[layer] = test_acts
-        deploy_activations[layer] = deploy_acts
+        if storage_format == 'individual':
+            # Load from individual files (new format)
+            test_dir = os.path.join(layer_dir, 'test')
+            deploy_dir = os.path.join(layer_dir, 'deploy')
 
-        print(f"Loaded layer {layer}: test {test_acts.shape}, deploy {deploy_acts.shape}")
+            test_acts = []
+            deploy_acts = []
+
+            for idx in range(num_examples):
+                test_acts.append(torch.load(os.path.join(test_dir, f'{idx}.pt')))
+                deploy_acts.append(torch.load(os.path.join(deploy_dir, f'{idx}.pt')))
+
+            test_activations[layer] = test_acts  # List of tensors
+            deploy_activations[layer] = deploy_acts
+
+            print(f"Loaded layer {layer}: {len(test_acts)} test and deploy activations")
+            print(f"  Sample shapes: {[act.shape for act in test_acts[:3]]}")
+        else:
+            # Load from stacked files (old format for backward compatibility)
+            test_acts = torch.load(os.path.join(layer_dir, 'test_activations.pt'))
+            deploy_acts = torch.load(os.path.join(layer_dir, 'deploy_activations.pt'))
+
+            test_activations[layer] = test_acts
+            deploy_activations[layer] = deploy_acts
+
+            print(f"Loaded layer {layer}: test {test_acts.shape}, deploy {deploy_acts.shape}")
 
     return test_activations, deploy_activations, metadata, layer_info
 
@@ -63,9 +87,11 @@ def compute_steering_vectors(test_activations, deploy_activations, layers):
     """
     Compute steering vectors from cached activations.
 
+    Following the paper's methodology: average over tokens, then compute mean difference.
+
     Args:
-        test_activations: Dict of layer -> test activation tensors
-        deploy_activations: Dict of layer -> deploy activation tensors
+        test_activations: Dict of layer -> test activation tensors (or list of tensors)
+        deploy_activations: Dict of layer -> deploy activation tensors (or list of tensors)
         layers: List of layer indices
 
     Returns:
@@ -74,9 +100,30 @@ def compute_steering_vectors(test_activations, deploy_activations, layers):
     steering_vectors = {}
 
     for layer in layers:
-        # Compute mean activations
-        test_mean = test_activations[layer].mean(dim=0)
-        deploy_mean = deploy_activations[layer].mean(dim=0)
+        test_acts = test_activations[layer]
+        deploy_acts = deploy_activations[layer]
+
+        # Handle both old format (single stacked tensor) and new format (list of tensors)
+        if isinstance(test_acts, list):
+            # New format: list of tensors with shape [batch=1, seq_len, hidden_dim]
+            # Average over tokens for each example, then average over examples
+            test_token_averaged = []
+            deploy_token_averaged = []
+
+            for act in test_acts:
+                # act shape: [1, seq_len, hidden_dim] -> average over seq_len -> [1, hidden_dim]
+                test_token_averaged.append(act.mean(dim=1))
+
+            for act in deploy_acts:
+                deploy_token_averaged.append(act.mean(dim=1))
+
+            # Stack and compute mean over examples
+            test_mean = torch.stack(test_token_averaged).mean(dim=0).squeeze()  # [hidden_dim]
+            deploy_mean = torch.stack(deploy_token_averaged).mean(dim=0).squeeze()  # [hidden_dim]
+        else:
+            # Old format: single tensor [num_examples, hidden_dim]
+            test_mean = test_acts.mean(dim=0)
+            deploy_mean = deploy_acts.mean(dim=0)
 
         # Steering vector = test_mean - deploy_mean
         steering_vector = test_mean - deploy_mean
